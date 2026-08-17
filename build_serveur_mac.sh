@@ -101,16 +101,35 @@ PYINSTALLER_ARGS=(
   --add-data "logo.png:."
 )
 
-# Icône .icns optionnelle : n'ajoute l'option que si le fichier existe, pour
-# ne pas casser le build si vous n'en avez pas encore préparé une.
+# Icône .icns : générée automatiquement depuis logo.png si elle n'existe pas
+# encore (sips/iconutil, outils macOS natifs). logo.png n'étant pas carré,
+# sips le recadre — si le résultat ne vous convient pas visuellement,
+# remplacez assets/icon.icns par une version travaillée manuellement puis
+# relancez ce script (il ne régénère jamais un .icns déjà présent).
+if [[ ! -f "$ICON_ICNS" ]] && [[ -f "logo.png" ]] && command -v sips &>/dev/null && command -v iconutil &>/dev/null; then
+  echo "  Génération de $ICON_ICNS depuis logo.png…"
+  mkdir -p "$(dirname "$ICON_ICNS")"
+  ICONSET="$(dirname "$ICON_ICNS")/icon.iconset"
+  rm -rf "$ICONSET"
+  mkdir -p "$ICONSET"
+  for taille in 16 32 128 256 512; do
+    sips -z "$taille" "$taille" logo.png --out "$ICONSET/icon_${taille}x${taille}.png" &>/dev/null
+    double=$((taille * 2))
+    sips -z "$double" "$double" logo.png --out "$ICONSET/icon_${taille}x${taille}@2x.png" &>/dev/null
+  done
+  iconutil -c icns "$ICONSET" -o "$ICON_ICNS"
+  rm -rf "$ICONSET"
+fi
+
+# N'ajoute l'option --icon que si le fichier existe, pour ne pas casser le
+# build si la génération ci-dessus n'a pas pu avoir lieu (logo.png absent,
+# sips/iconutil indisponibles).
 if [[ -f "$ICON_ICNS" ]]; then
   echo "  Icône trouvée : $ICON_ICNS"
   PYINSTALLER_ARGS+=(--icon "$ICON_ICNS")
 else
   echo "  Aucune icône .icns trouvée ($ICON_ICNS) — l'app aura l'icône"
-  echo "  générique PyInstaller. Générez-en une avec :"
-  echo "    sips -s format icns votre_logo.png --out assets/icon.icns"
-  echo "  (ou via iconutil à partir d'un dossier .iconset)"
+  echo "  générique PyInstaller."
 fi
 
 python -m PyInstaller "${PYINSTALLER_ARGS[@]}" app/main_server.py
