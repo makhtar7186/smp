@@ -81,9 +81,14 @@ echo "→ Installation des dépendances du mode client uniquement…"
 # openpyxl est un import de tête de app/client/ui.py (onglet « Import
 # historique », lecture du classeur legacy) : sans lui, l'app plante au
 # lancement avec "No module named 'openpyxl'", pas seulement à l'usage de
-# cet onglet.
+# cet onglet. Même chose pour tkcalendar (app/ui/components/champ_date.py,
+# sélecteur de date partagé avec l'app Facturation). psycopg2-binary est
+# importé paresseusement (postgres_migration_service.py échoue proprement
+# avec un message clair si absent, jamais un crash) mais reste installé ici
+# par cohérence avec le build Windows (requirements.txt) : sans lui, la
+# migration Postgres depuis l'onglet Serveur ne fonctionne simplement pas.
 pip install --quiet --upgrade pip
-pip install --quiet requests matplotlib reportlab openpyxl pyinstaller
+pip install --quiet requests matplotlib reportlab openpyxl tkcalendar psycopg2-binary pyinstaller
 
 # ---------------------------------------------------------------------------
 # Compilation
@@ -94,6 +99,11 @@ PYINSTALLER_ARGS=(
   --noconfirm --clean --onefile --windowed
   --name "$APP_NAME"
   --osx-bundle-identifier "$BUNDLE_ID"
+  # psycopg2 n'est importé que dans une fonction (jamais au chargement du
+  # module) : l'analyse statique de PyInstaller ne le détecte pas toujours
+  # tout seul — cf. requirements.txt, même précaution que pour le build
+  # Windows de SMP-Client.exe.
+  --hidden-import psycopg2
   # --add-data avec ":" (séparateur macOS/Linux, ";" sous Windows) : le logo
   # est nécessaire depuis AccesDirectDonnees (PDF régénéré en local avec logo
   # quand ce poste héberge sa propre base).
