@@ -1,0 +1,39 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# --- Environnements virtuels ---
+venv/
+venv_*/
+.venv/
+
+# --- Tests ---
+.pytest_cache/
+.coverage
+htmlcov/
+
+# --- PyInstaller (builds Windows et Mac) ---
+build/
+dist/
+*.spec
+
+# --- Données runtime (créées au 1er lancement, jamais versionnées) ---
+# Base SQLite, settings.json, configs contenant les jetons API
+# (client_config.json/stock_config.json/sync_config.json), logs, exports PDF,
+# cache de la machine de facturation hors ligne — voir CLAUDE.md section 2.
+app/data/
+
+# --- Fichiers de sauvegarde ponctuels ---
+*.bak
+*.bak.*
+*.xlsm
+
+# --- Éditeurs / OS ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# --- Outils internes ---
+.claude/

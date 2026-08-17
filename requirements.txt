@@ -1,0 +1,19 @@
+openpyxl==3.1.5
+reportlab==4.5.1
+matplotlib==3.10.3
+tkcalendar==1.6.1
+pytest==9.1.1
+fastapi==0.136.3
+uvicorn==0.49.0
+requests==2.34.2
+httpx==0.28.1
+python-multipart==0.0.32
+
+# Migration PostgreSQL (onglet Serveur, app/services/postgres_migration_service.py).
+# Import toujours paresseux dans le code (jamais au chargement du module),
+# mais doit être réellement installé dans le venv AVANT de builder
+# PRO-MATELAS-Client.exe pour que PyInstaller l'embarque : un import
+# try/except ImportError n'est pas toujours détecté par l'analyse statique
+# de PyInstaller — ajoutez --hidden-import psycopg2 à la commande de build
+# de PRO-MATELAS-Client.exe par sécurité (voir CLAUDE.md, section Commandes).
+psycopg2-binary==2.9.12
