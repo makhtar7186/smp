@@ -12,7 +12,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 if getattr(sys, "frozen", False):
-    _DOSSIER = Path(sys.executable).resolve().parent
+    _EXECUTABLE = Path(sys.executable).resolve()
+    if _EXECUTABLE.parent.name == "MacOS" and _EXECUTABLE.parent.parent.name == "Contents":
+        # Bundle .app macOS : voir app/config.py pour l'explication complète
+        # (même bug, même correctif — sys.executable pointe vers le binaire
+        # interne du bundle, pas vers son dossier parent).
+        _DOSSIER = _EXECUTABLE.parents[3]
+    else:
+        _DOSSIER = _EXECUTABLE.parent
 else:
     _DOSSIER = Path(__file__).resolve().parent.parent.parent
 

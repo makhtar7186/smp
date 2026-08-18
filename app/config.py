@@ -10,7 +10,23 @@ from pathlib import Path
 # En exécutable PyInstaller (sys.frozen) : les données (base, exports, réglages)
 # vivent à côté du .exe ; les ressources embarquées (logo) dans sys._MEIPASS.
 if getattr(sys, "frozen", False):
-    RACINE_PROJET: Path = Path(sys.executable).resolve().parent
+    _EXECUTABLE: Path = Path(sys.executable).resolve()
+    if _EXECUTABLE.parent.name == "MacOS" and _EXECUTABLE.parent.parent.name == "Contents":
+        # Bundle .app macOS (SMP-Client.app/Contents/MacOS/SMP-Client) :
+        # sys.executable pointe vers le binaire interne, profondément niché
+        # dans le bundle — "à côté de l'exécutable" doit donc s'entendre à
+        # côté du .app lui-même (son dossier parent), pas dans
+        # Contents/MacOS/. Sans ce cas particulier, chaque .app (SMP-Client,
+        # SMP-Serveur) avait son PROPRE data/settings.json isolé à
+        # l'intérieur de son bundle, alors que sous Windows SMP.exe/
+        # SMP-Client.exe et SMP-Serveur.exe partagent le même dossier data/
+        # en étant simplement installés côte à côte — un changement de
+        # config (ex. IP Tailscale) fait via l'app Client n'atteignait donc
+        # jamais le processus SMP-Serveur réellement lancé, qui lisait son
+        # propre fichier isolé, jamais modifié.
+        RACINE_PROJET: Path = _EXECUTABLE.parents[3]
+    else:
+        RACINE_PROJET = _EXECUTABLE.parent
     _RESSOURCES: Path = Path(getattr(sys, "_MEIPASS", RACINE_PROJET))
     DOSSIER_DATA: Path = RACINE_PROJET / "data"
 else:
