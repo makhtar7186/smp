@@ -58,10 +58,14 @@ if [[ "$ARCH" == "arm64" ]]; then
   echo "   plus bas dans ce script)"
 fi
 
-# Nettoyage des builds précédents pour éviter des artefacts obsolètes
-# (fichiers de données oubliés, ancienne version embarquée, etc.)
-echo "→ Nettoyage build/ et dist/ précédents…"
-rm -rf build dist "${APP_NAME}.spec"
+# Nettoyage du build précédent DE CETTE APP UNIQUEMENT — jamais tout build/
+# ni tout dist/, qui contiennent aussi les artefacts de l'autre app
+# (build_serveur_mac.sh y écrit SMP-Serveur.app à côté). SMP-Client et
+# SMP-Serveur doivent pouvoir coexister dans dist/ : c'est là que
+# ApiManagementService._chemin_executable_serveur() va chercher SMP-Serveur
+# à côté de SMP-Client au moment de le démarrer depuis l'onglet Serveur.
+echo "→ Nettoyage du build précédent de ${APP_NAME}…"
+rm -rf "build/${APP_NAME}" "dist/${APP_NAME}.app" "dist/${APP_NAME}" "${APP_NAME}.spec"
 
 # ---------------------------------------------------------------------------
 # Environnement virtuel dédié au build
