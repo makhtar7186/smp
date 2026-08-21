@@ -12,6 +12,12 @@ PyInstaller ne détecte pas les imports résolus par chaîne lors de son analyse
 statique du bundle, ce qui ferait planter le serveur une fois packagé en
 exécutable (`Could not import module "app.api.app"`) alors qu'il fonctionne
 depuis les sources.
+
+Ce processus est le seul, dans toute l'architecture, garanti de tourner en
+continu (voir CLAUDE.md, « Serveur autonome ») : c'est donc ici, et
+seulement ici, qu'est démarrée `SqliteBackupWorker` — la sauvegarde
+hebdomadaire PostgreSQL → SQLite (voir `app/services/sqlite_backup_service.py`),
+sans effet tant que la base boss n'a pas été basculée sur PostgreSQL.
 """
 from __future__ import annotations
 
@@ -21,10 +27,25 @@ import uvicorn
 
 from app import config
 from app.api.app import app as _application
+from app.services.sqlite_backup_service import SqliteBackupWorker
+
+_worker_sauvegarde_sqlite: SqliteBackupWorker | None = None
+
+
+def _demarrer_sauvegarde_sqlite() -> None:
+    """Idempotent : un seul worker par processus, quel que soit le nombre
+    d'appels (`demarrer()`/`demarrer_arriere_plan()` ne sont normalement
+    jamais appelées plus d'une fois dans le même processus, mais un garde
+    explicite coûte peu)."""
+    global _worker_sauvegarde_sqlite
+    if _worker_sauvegarde_sqlite is None:
+        _worker_sauvegarde_sqlite = SqliteBackupWorker()
+        _worker_sauvegarde_sqlite.demarrer()
 
 
 def demarrer(host: str | None = None, port: int | None = None) -> None:
     """Démarre le serveur API en bloquant (usage : script séparé ou service)."""
+    _demarrer_sauvegarde_sqlite()
     uvicorn.run(
         _application,
         host=host or config.lire_api_host(),
@@ -37,6 +58,7 @@ def demarrer_arriere_plan(host: str | None = None, port: int | None = None) -> t
     """Démarre le serveur API dans un thread démon, pour cohabiter avec la
     boucle Tkinter de l'application principale. Le thread s'arrête seul à la
     fermeture du processus (daemon=True)."""
+    _demarrer_sauvegarde_sqlite()
     hote = host or config.lire_api_host()
     portail = port or config.lire_api_port()
 

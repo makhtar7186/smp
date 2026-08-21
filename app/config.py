@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import sys
 from pathlib import Path
 
@@ -42,6 +43,59 @@ CHEMIN_LOGO: Path = _RESSOURCES / "logo.png"
 # tables/schéma que la base boss (`promatelas.db`), mais jamais la source de
 # vérité. Voir CLAUDE.md, section « Machine de facturation ».
 CHEMIN_CACHE_FACTURATION: Path = DOSSIER_DATA / "cache_facturation.db"
+
+
+_ATTRIBUT_WINDOWS_CACHE = 0x2  # FILE_ATTRIBUTE_HIDDEN
+_ATTRIBUTS_WINDOWS_INVALIDES = 0xFFFFFFFF  # INVALID_FILE_ATTRIBUTES (échec de GetFileAttributesW)
+
+
+def _masquer(chemin: Path) -> None:
+    """Cache ce fichier/dossier de l'explorateur de fichiers (Finder macOS /
+    Explorateur Windows) — les données qu'il contient (base SQLite, jetons
+    API, mot de passe PostgreSQL en clair — voir `definir_config_postgres`)
+    n'ont aucune raison d'être visibles en parcourant le dossier
+    d'installation de l'app.
+
+    macOS : `chflags hidden` plutôt qu'un renommage en `.xxx` — le chemin
+    déjà utilisé partout dans le code (`DOSSIER_DATA`, etc.) ne change pas.
+    Reste listable via `ls -a`/Terminal.
+
+    Windows : attribut `FILE_ATTRIBUTE_HIDDEN` (équivalent de `attrib +h`),
+    posé par-dessus les attributs déjà présents (lus via
+    `GetFileAttributesW` puis complétés, jamais écrasés — sans ça, un
+    fichier ayant déjà un autre attribut, ex. lecture seule, le perdrait).
+    Reste listable via `dir /a` ou « Afficher les éléments cachés » de
+    l'Explorateur.
+
+    Désactivable via la variable d'environnement `SMP_NE_PAS_MASQUER`
+    (debug, préférence utilisateur). N'échoue jamais bruyamment (ex. volume
+    réseau ne supportant pas cet attribut) : purement cosmétique, jamais une
+    condition de fonctionnement de l'app."""
+    if os.environ.get("SMP_NE_PAS_MASQUER"):
+        return
+    if sys.platform == "darwin":
+        try:
+            os.chflags(str(chemin), stat.UF_HIDDEN)
+        except OSError:
+            pass
+    elif sys.platform == "win32":
+        try:
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            attributs = kernel32.GetFileAttributesW(str(chemin))
+            if attributs != _ATTRIBUTS_WINDOWS_INVALIDES:
+                kernel32.SetFileAttributesW(str(chemin), attributs | _ATTRIBUT_WINDOWS_CACHE)
+        except OSError:
+            pass
+
+
+def _assurer_dossier_data() -> None:
+    """Crée `DOSSIER_DATA` au besoin et le cache (voir `_masquer`) — point
+    d'entrée unique appelé par toute fonction qui y écrit, pour ne jamais
+    laisser un `data/` visible selon que ce soit ce dossier-ci ou tel autre
+    réglage qui l'a créé en premier sur une machine donnée."""
+    DOSSIER_DATA.mkdir(parents=True, exist_ok=True)
+    _masquer(DOSSIER_DATA)
 
 # Métier ----------------------------------------------------------------------
 DEVISE: str = "FCFA"
@@ -133,7 +187,7 @@ def sauver_api_config(host: str | None = None, port: int | None = None,
                       token_facturation: str | None = None,
                       token_stock: str | None = None) -> None:
     """Persiste la configuration du serveur API (hôte, port, jetons par rôle)."""
-    DOSSIER_DATA.mkdir(parents=True, exist_ok=True)
+    _assurer_dossier_data()
     settings = _lire_settings()
     if host is not None:
         settings["api_host"] = host
@@ -165,7 +219,7 @@ def api_active() -> bool:
 def definir_api_active(actif: bool) -> None:
     """Persiste l'intention de démarrer automatiquement le serveur au
     prochain lancement de cette application — voir `api_active`."""
-    DOSSIER_DATA.mkdir(parents=True, exist_ok=True)
+    _assurer_dossier_data()
     settings = _lire_settings()
     settings["api_actif"] = actif
     CHEMIN_SETTINGS.write_text(
@@ -201,7 +255,7 @@ def definir_mode_machine(mode: str) -> None:
     nécessaire pour qu'il prenne effet (voir `app/main.py`)."""
     if mode not in MODES_MACHINE:
         raise ValueError(f"mode_machine invalide : {mode!r}")
-    DOSSIER_DATA.mkdir(parents=True, exist_ok=True)
+    _assurer_dossier_data()
     settings = _lire_settings()
     settings["mode_machine"] = mode
     CHEMIN_SETTINGS.write_text(
@@ -231,7 +285,7 @@ def definir_moteur_bdd(moteur: str) -> None:
     n'est appelée qu'une fois, au démarrage)."""
     if moteur not in MOTEURS_BDD:
         raise ValueError(f"moteur_bdd invalide : {moteur!r}")
-    DOSSIER_DATA.mkdir(parents=True, exist_ok=True)
+    _assurer_dossier_data()
     settings = _lire_settings()
     settings["moteur_bdd"] = moteur
     CHEMIN_SETTINGS.write_text(
@@ -255,7 +309,7 @@ def lire_config_postgres() -> dict:
 def definir_config_postgres(hote: str, port: int, base: str, utilisateur: str,
                             mot_de_passe: str) -> None:
     """Persiste les coordonnées de connexion PostgreSQL de la base boss."""
-    DOSSIER_DATA.mkdir(parents=True, exist_ok=True)
+    _assurer_dossier_data()
     settings = _lire_settings()
     settings.update({
         "pg_hote": hote, "pg_port": port, "pg_base": base,
@@ -274,7 +328,7 @@ def lire_langue() -> str:
 
 def sauver_langue(langue: str) -> None:
     """Persiste la langue choisie par l'utilisateur."""
-    DOSSIER_DATA.mkdir(parents=True, exist_ok=True)
+    _assurer_dossier_data()
     settings = _lire_settings()
     settings["langue"] = langue
     CHEMIN_SETTINGS.write_text(
@@ -284,5 +338,5 @@ def sauver_langue(langue: str) -> None:
 
 def preparer_dossiers() -> None:
     """Crée les dossiers de données et d'exports au premier lancement."""
-    DOSSIER_DATA.mkdir(parents=True, exist_ok=True)
+    _assurer_dossier_data()
     DOSSIER_EXPORTS.mkdir(parents=True, exist_ok=True)

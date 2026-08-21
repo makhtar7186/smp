@@ -9,6 +9,8 @@ cette application desktop mono-utilisateur (voir CLAUDE.md)."""
 from __future__ import annotations
 
 import json
+import os
+import stat
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,6 +28,33 @@ else:
     _DOSSIER = Path(__file__).resolve().parent.parent.parent
 
 CHEMIN_CONFIG_POSTGRES: Path = _DOSSIER / "postgres_config.json"
+
+
+_ATTRIBUT_WINDOWS_CACHE = 0x2  # FILE_ATTRIBUTE_HIDDEN
+_ATTRIBUTS_WINDOWS_INVALIDES = 0xFFFFFFFF  # INVALID_FILE_ATTRIBUTES
+
+
+def _masquer(chemin: Path) -> None:
+    """Cache ce fichier de l'explorateur de fichiers (Finder macOS /
+    Explorateur Windows) — voir app/config.py::_masquer pour l'explication
+    complète (même fonction, dupliquée ici : ce module reste volontairement
+    indépendant de `app.config`, voir la docstring en tête de fichier)."""
+    if os.environ.get("SMP_NE_PAS_MASQUER"):
+        return
+    if sys.platform == "darwin":
+        try:
+            os.chflags(str(chemin), stat.UF_HIDDEN)
+        except OSError:
+            pass
+    elif sys.platform == "win32":
+        try:
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            attributs = kernel32.GetFileAttributesW(str(chemin))
+            if attributs != _ATTRIBUTS_WINDOWS_INVALIDES:
+                kernel32.SetFileAttributesW(str(chemin), attributs | _ATTRIBUT_WINDOWS_CACHE)
+        except OSError:
+            pass
 
 
 @dataclass
@@ -66,3 +95,4 @@ def sauvegarder(config: ConfigPostgresStockee) -> None:
         }, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    _masquer(CHEMIN_CONFIG_POSTGRES)
