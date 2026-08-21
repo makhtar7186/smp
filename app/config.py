@@ -45,82 +45,70 @@ CHEMIN_LOGO: Path = _RESSOURCES / "logo.png"
 CHEMIN_CACHE_FACTURATION: Path = DOSSIER_DATA / "cache_facturation.db"
 
 
-_ATTRIBUT_WINDOWS_CACHE = 0x2  # FILE_ATTRIBUTE_HIDDEN
-_ATTRIBUTS_WINDOWS_INVALIDES = 0xFFFFFFFF  # INVALID_FILE_ATTRIBUTES (échec de GetFileAttributesW)
-
-
 def _masquer(chemin: Path) -> None:
-    """Cache ce fichier/dossier de l'explorateur de fichiers (Finder macOS /
-    Explorateur Windows) — les données qu'il contient (base SQLite, jetons
-    API, mot de passe PostgreSQL en clair — voir `definir_config_postgres`)
-    n'ont aucune raison d'être visibles en parcourant le dossier
-    d'installation de l'app.
+    """Cache ce fichier/dossier du Finder (macOS uniquement) — les données
+    qu'il contient (base SQLite, jetons API, mot de passe PostgreSQL en
+    clair — voir `definir_config_postgres`) n'ont aucune raison d'être
+    visibles en parcourant le dossier d'installation de l'app. `chflags
+    hidden` plutôt qu'un renommage en `.xxx` : le chemin déjà utilisé
+    partout dans le code (`DOSSIER_DATA`, etc.) ne change pas. Reste
+    listable via `ls -a`/Terminal.
 
-    macOS : `chflags hidden` plutôt qu'un renommage en `.xxx` — le chemin
-    déjà utilisé partout dans le code (`DOSSIER_DATA`, etc.) ne change pas.
-    Reste listable via `ls -a`/Terminal.
-
-    Windows : attribut `FILE_ATTRIBUTE_HIDDEN` (équivalent de `attrib +h`),
-    posé par-dessus les attributs déjà présents (lus via
-    `GetFileAttributesW` puis complétés, jamais écrasés — sans ça, un
-    fichier ayant déjà un autre attribut, ex. lecture seule, le perdrait).
-    Reste listable via `dir /a` ou « Afficher les éléments cachés » de
-    l'Explorateur.
+    **Jamais appliqué sous Windows** : une première version masquait aussi
+    via `FILE_ATTRIBUTE_HIDDEN`, mais réécrire un fichier déjà cache de
+    cette façon échoue avec `PermissionError`/« Permission denied » côté
+    Windows si l'attribut n'est pas explicitement redemandé (ce que l'API
+    Python ne fait jamais) — corrigé une première fois en retirant
+    l'attribut avant chaque écriture, mais le motif « changer les attributs
+    puis réécrire » reste ensuite bloqué par endroits par un antivirus/
+    Windows Defender (heuristique proche d'un comportement de rançongiciel),
+    observé en usage réel sur un poste client. Retiré entièrement côté
+    Windows plutôt que de complexifier davantage un contournement pour un
+    gain purement cosmétique.
 
     Désactivable via la variable d'environnement `SMP_NE_PAS_MASQUER`
     (debug, préférence utilisateur). N'échoue jamais bruyamment (ex. volume
     réseau ne supportant pas cet attribut) : purement cosmétique, jamais une
     condition de fonctionnement de l'app."""
-    if os.environ.get("SMP_NE_PAS_MASQUER"):
+    if sys.platform != "darwin" or os.environ.get("SMP_NE_PAS_MASQUER"):
         return
-    if sys.platform == "darwin":
-        try:
-            os.chflags(str(chemin), stat.UF_HIDDEN)
-        except OSError:
-            pass
-    elif sys.platform == "win32":
-        try:
-            import ctypes
-            kernel32 = ctypes.windll.kernel32
-            attributs = kernel32.GetFileAttributesW(str(chemin))
-            if attributs != _ATTRIBUTS_WINDOWS_INVALIDES:
-                kernel32.SetFileAttributesW(str(chemin), attributs | _ATTRIBUT_WINDOWS_CACHE)
-        except OSError:
-            pass
+    try:
+        os.chflags(str(chemin), stat.UF_HIDDEN)
+    except OSError:
+        pass
 
 
-def _demasquer(chemin: Path) -> None:
-    """Retire l'attribut caché juste avant une réécriture (voir `_masquer`).
+def _nettoyer_masquage_windows_residuel(chemin: Path) -> None:
+    """Retire l'attribut `FILE_ATTRIBUTE_HIDDEN` s'il est encore présent sur
+    ce fichier/dossier — résidu laissé par une version antérieure qui
+    masquait aussi sous Windows (voir `_masquer`), jamais reposé ensuite.
 
-    Sous Windows, `write_text()` (donc `CreateFile` en `CREATE_ALWAYS`/
-    tronqué) échoue avec `PermissionError: [Errno 13] Permission denied`
-    sur un fichier déjà marqué `FILE_ATTRIBUTE_HIDDEN` si le nouvel appel ne
-    redemande pas explicitement cet attribut — ce que l'API Python
-    (`open`/`Path.write_text`) ne fait jamais. Sans ce retrait préalable,
-    **toute réécriture d'un fichier déjà caché plantait** (bug réel observé
-    en usage : impossible d'enregistrer une nouvelle IP de connexion dans
-    `client_config.json` une fois celui-ci caché par un premier
-    enregistrement). `_masquer()` doit être rappelée après l'écriture pour
-    reposer l'attribut. Sans effet sur macOS (`chflags hidden` n'empêche
-    jamais une réécriture, vérifié) — mais appelée sans condition de
-    plateforme pour rester symétrique de `_masquer()` et ne pas avoir à
-    dupliquer un `if sys.platform == "win32"` à chaque site d'appel."""
-    if sys.platform != "win32" or os.environ.get("SMP_NE_PAS_MASQUER"):
+    Appelée une seule fois, au démarrage (`preparer_dossiers()`), jamais
+    couplée à une écriture ultérieure comme l'était `_demasquer()` : le
+    blocage observé en usage réel (`PermissionError`, vraisemblablement un
+    antivirus/Windows Defender) semblait lié au motif « changer l'attribut
+    puis réécrire immédiatement » — séparer les deux dans le temps réduit le
+    risque de redéclencher la même heuristique. N'échoue jamais bruyamment :
+    auto-corrige silencieusement les installations déjà affectées, sans
+    action manuelle requise côté utilisateur."""
+    if sys.platform != "win32":
         return
     try:
         import ctypes
         kernel32 = ctypes.windll.kernel32
         attributs = kernel32.GetFileAttributesW(str(chemin))
-        if attributs != _ATTRIBUTS_WINDOWS_INVALIDES:
-            kernel32.SetFileAttributesW(str(chemin), attributs & ~_ATTRIBUT_WINDOWS_CACHE)
+        if attributs != 0xFFFFFFFF and attributs & 0x2:  # FILE_ATTRIBUTE_HIDDEN
+            kernel32.SetFileAttributesW(str(chemin), attributs & ~0x2)
     except OSError:
         pass
 
 
 def _ecrire_settings(settings: dict) -> None:
-    """Point d'écriture unique de `settings.json` — retire l'attribut caché
-    avant d'écrire, la repose après (voir `_demasquer`)."""
-    _demasquer(CHEMIN_SETTINGS)
+    """Point d'écriture unique de `settings.json` — nettoyage résiduel
+    d'abord (voir `_nettoyer_masquage_windows_residuel`) : `preparer_dossiers()`
+    ne suffit pas seul, toutes les fonctions de sauvegarde n'y passent pas
+    forcément avant d'écrire."""
+    _nettoyer_masquage_windows_residuel(CHEMIN_SETTINGS)
     CHEMIN_SETTINGS.write_text(
         json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8"
     )
@@ -366,3 +354,5 @@ def preparer_dossiers() -> None:
     """Crée les dossiers de données et d'exports au premier lancement."""
     _assurer_dossier_data()
     DOSSIER_EXPORTS.mkdir(parents=True, exist_ok=True)
+    _nettoyer_masquage_windows_residuel(DOSSIER_DATA)
+    _nettoyer_masquage_windows_residuel(CHEMIN_SETTINGS)

@@ -28,46 +28,33 @@ else:
 CHEMIN_CONFIG_CLIENT: Path = _DOSSIER / "client_config.json"
 
 
-_ATTRIBUT_WINDOWS_CACHE = 0x2  # FILE_ATTRIBUTE_HIDDEN
-_ATTRIBUTS_WINDOWS_INVALIDES = 0xFFFFFFFF  # INVALID_FILE_ATTRIBUTES
-
-
 def _masquer(chemin: Path) -> None:
-    """Cache ce fichier de l'explorateur de fichiers (Finder macOS /
-    Explorateur Windows) — voir app/config.py::_masquer pour l'explication
-    complète (même fonction, dupliquée ici : ce module reste volontairement
-    indépendant de `app.config`, voir la docstring en tête de fichier)."""
-    if os.environ.get("SMP_NE_PAS_MASQUER"):
+    """Cache ce fichier du Finder (macOS uniquement — jamais sous Windows,
+    voir app/config.py::_masquer pour l'explication complète : le masquage
+    Windows a été retiré après avoir provoqué des `PermissionError` en usage
+    réel). Dupliquée ici : ce module reste volontairement indépendant de
+    `app.config`, voir la docstring en tête de fichier."""
+    if sys.platform != "darwin" or os.environ.get("SMP_NE_PAS_MASQUER"):
         return
-    if sys.platform == "darwin":
-        try:
-            os.chflags(str(chemin), stat.UF_HIDDEN)
-        except OSError:
-            pass
-    elif sys.platform == "win32":
-        try:
-            import ctypes
-            kernel32 = ctypes.windll.kernel32
-            attributs = kernel32.GetFileAttributesW(str(chemin))
-            if attributs != _ATTRIBUTS_WINDOWS_INVALIDES:
-                kernel32.SetFileAttributesW(str(chemin), attributs | _ATTRIBUT_WINDOWS_CACHE)
-        except OSError:
-            pass
+    try:
+        os.chflags(str(chemin), stat.UF_HIDDEN)
+    except OSError:
+        pass
 
 
-def _demasquer(chemin: Path) -> None:
-    """Retire l'attribut caché juste avant une réécriture — voir
-    app/config.py::_demasquer pour l'explication complète (sous Windows,
-    réécrire un fichier déjà `FILE_ATTRIBUTE_HIDDEN` échoue sinon avec
-    Permission denied)."""
-    if sys.platform != "win32" or os.environ.get("SMP_NE_PAS_MASQUER"):
+def _nettoyer_masquage_windows_residuel(chemin: Path) -> None:
+    """Retire l'attribut caché Windows résiduel — voir
+    app/config.py::_nettoyer_masquage_windows_residuel pour l'explication
+    complète. Appelée une seule fois, au chargement (`charger()`), jamais
+    couplée à `sauvegarder()`."""
+    if sys.platform != "win32":
         return
     try:
         import ctypes
         kernel32 = ctypes.windll.kernel32
         attributs = kernel32.GetFileAttributesW(str(chemin))
-        if attributs != _ATTRIBUTS_WINDOWS_INVALIDES:
-            kernel32.SetFileAttributesW(str(chemin), attributs & ~_ATTRIBUT_WINDOWS_CACHE)
+        if attributs != 0xFFFFFFFF and attributs & 0x2:  # FILE_ATTRIBUTE_HIDDEN
+            kernel32.SetFileAttributesW(str(chemin), attributs & ~0x2)
     except OSError:
         pass
 
@@ -97,6 +84,7 @@ def charger() -> ConfigClient:
     """Lit la configuration sauvegardée (vide si premier lancement)."""
     if not CHEMIN_CONFIG_CLIENT.exists():
         return ConfigClient()
+    _nettoyer_masquage_windows_residuel(CHEMIN_CONFIG_CLIENT)
     try:
         donnees = json.loads(CHEMIN_CONFIG_CLIENT.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
@@ -112,7 +100,7 @@ def charger() -> ConfigClient:
 
 def sauvegarder(config: ConfigClient) -> None:
     """Persiste la configuration pour les lancements suivants."""
-    _demasquer(CHEMIN_CONFIG_CLIENT)
+    _nettoyer_masquage_windows_residuel(CHEMIN_CONFIG_CLIENT)
     CHEMIN_CONFIG_CLIENT.write_text(
         json.dumps({"hote": config.hote, "port": config.port, "token": config.token,
                     "machine_id": config.machine_id, "langue": config.langue},
