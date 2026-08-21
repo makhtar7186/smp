@@ -55,6 +55,23 @@ def _masquer(chemin: Path) -> None:
             pass
 
 
+def _demasquer(chemin: Path) -> None:
+    """Retire l'attribut caché juste avant une réécriture — voir
+    app/config.py::_demasquer pour l'explication complète (sous Windows,
+    réécrire un fichier déjà `FILE_ATTRIBUTE_HIDDEN` échoue sinon avec
+    Permission denied)."""
+    if sys.platform != "win32" or os.environ.get("SMP_NE_PAS_MASQUER"):
+        return
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        attributs = kernel32.GetFileAttributesW(str(chemin))
+        if attributs != _ATTRIBUTS_WINDOWS_INVALIDES:
+            kernel32.SetFileAttributesW(str(chemin), attributs & ~_ATTRIBUT_WINDOWS_CACHE)
+    except OSError:
+        pass
+
+
 @dataclass
 class ConfigClient:
     """Coordonnées de connexion à la machine principale."""
@@ -95,6 +112,7 @@ def charger() -> ConfigClient:
 
 def sauvegarder(config: ConfigClient) -> None:
     """Persiste la configuration pour les lancements suivants."""
+    _demasquer(CHEMIN_CONFIG_CLIENT)
     CHEMIN_CONFIG_CLIENT.write_text(
         json.dumps({"hote": config.hote, "port": config.port, "token": config.token,
                     "machine_id": config.machine_id, "langue": config.langue},

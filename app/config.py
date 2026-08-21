@@ -89,6 +89,44 @@ def _masquer(chemin: Path) -> None:
             pass
 
 
+def _demasquer(chemin: Path) -> None:
+    """Retire l'attribut caché juste avant une réécriture (voir `_masquer`).
+
+    Sous Windows, `write_text()` (donc `CreateFile` en `CREATE_ALWAYS`/
+    tronqué) échoue avec `PermissionError: [Errno 13] Permission denied`
+    sur un fichier déjà marqué `FILE_ATTRIBUTE_HIDDEN` si le nouvel appel ne
+    redemande pas explicitement cet attribut — ce que l'API Python
+    (`open`/`Path.write_text`) ne fait jamais. Sans ce retrait préalable,
+    **toute réécriture d'un fichier déjà caché plantait** (bug réel observé
+    en usage : impossible d'enregistrer une nouvelle IP de connexion dans
+    `client_config.json` une fois celui-ci caché par un premier
+    enregistrement). `_masquer()` doit être rappelée après l'écriture pour
+    reposer l'attribut. Sans effet sur macOS (`chflags hidden` n'empêche
+    jamais une réécriture, vérifié) — mais appelée sans condition de
+    plateforme pour rester symétrique de `_masquer()` et ne pas avoir à
+    dupliquer un `if sys.platform == "win32"` à chaque site d'appel."""
+    if sys.platform != "win32" or os.environ.get("SMP_NE_PAS_MASQUER"):
+        return
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        attributs = kernel32.GetFileAttributesW(str(chemin))
+        if attributs != _ATTRIBUTS_WINDOWS_INVALIDES:
+            kernel32.SetFileAttributesW(str(chemin), attributs & ~_ATTRIBUT_WINDOWS_CACHE)
+    except OSError:
+        pass
+
+
+def _ecrire_settings(settings: dict) -> None:
+    """Point d'écriture unique de `settings.json` — retire l'attribut caché
+    avant d'écrire, la repose après (voir `_demasquer`)."""
+    _demasquer(CHEMIN_SETTINGS)
+    CHEMIN_SETTINGS.write_text(
+        json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    _masquer(CHEMIN_SETTINGS)
+
+
 def _assurer_dossier_data() -> None:
     """Crée `DOSSIER_DATA` au besoin et le cache (voir `_masquer`) — point
     d'entrée unique appelé par toute fonction qui y écrit, pour ne jamais
@@ -201,9 +239,7 @@ def sauver_api_config(host: str | None = None, port: int | None = None,
         settings["api_token_facturation"] = token_facturation
     if token_stock is not None:
         settings["api_token_stock"] = token_stock
-    CHEMIN_SETTINGS.write_text(
-        json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    _ecrire_settings(settings)
 
 
 def api_active() -> bool:
@@ -222,9 +258,7 @@ def definir_api_active(actif: bool) -> None:
     _assurer_dossier_data()
     settings = _lire_settings()
     settings["api_actif"] = actif
-    CHEMIN_SETTINGS.write_text(
-        json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    _ecrire_settings(settings)
 
 
 def _lire_settings() -> dict:
@@ -258,9 +292,7 @@ def definir_mode_machine(mode: str) -> None:
     _assurer_dossier_data()
     settings = _lire_settings()
     settings["mode_machine"] = mode
-    CHEMIN_SETTINGS.write_text(
-        json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    _ecrire_settings(settings)
 
 
 MOTEURS_BDD: tuple[str, ...] = ("sqlite", "postgresql")
@@ -288,9 +320,7 @@ def definir_moteur_bdd(moteur: str) -> None:
     _assurer_dossier_data()
     settings = _lire_settings()
     settings["moteur_bdd"] = moteur
-    CHEMIN_SETTINGS.write_text(
-        json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    _ecrire_settings(settings)
 
 
 def lire_config_postgres() -> dict:
@@ -315,9 +345,7 @@ def definir_config_postgres(hote: str, port: int, base: str, utilisateur: str,
         "pg_hote": hote, "pg_port": port, "pg_base": base,
         "pg_utilisateur": utilisateur, "pg_mot_de_passe": mot_de_passe,
     })
-    CHEMIN_SETTINGS.write_text(
-        json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    _ecrire_settings(settings)
 
 
 def lire_langue() -> str:
@@ -331,9 +359,7 @@ def sauver_langue(langue: str) -> None:
     _assurer_dossier_data()
     settings = _lire_settings()
     settings["langue"] = langue
-    CHEMIN_SETTINGS.write_text(
-        json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    _ecrire_settings(settings)
 
 
 def preparer_dossiers() -> None:

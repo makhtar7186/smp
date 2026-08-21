@@ -57,6 +57,23 @@ def _masquer(chemin: Path) -> None:
             pass
 
 
+def _demasquer(chemin: Path) -> None:
+    """Retire l'attribut caché juste avant une réécriture — voir
+    app/config.py::_demasquer pour l'explication complète (sous Windows,
+    réécrire un fichier déjà `FILE_ATTRIBUTE_HIDDEN` échoue sinon avec
+    Permission denied)."""
+    if sys.platform != "win32" or os.environ.get("SMP_NE_PAS_MASQUER"):
+        return
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        attributs = kernel32.GetFileAttributesW(str(chemin))
+        if attributs != _ATTRIBUTS_WINDOWS_INVALIDES:
+            kernel32.SetFileAttributesW(str(chemin), attributs & ~_ATTRIBUT_WINDOWS_CACHE)
+    except OSError:
+        pass
+
+
 @dataclass
 class ConfigPostgresStockee:
     """Coordonnées de connexion à la base PostgreSQL cible, persistées entre
@@ -88,6 +105,7 @@ def charger() -> ConfigPostgresStockee:
 
 def sauvegarder(config: ConfigPostgresStockee) -> None:
     """Persiste la configuration pour les lancements suivants."""
+    _demasquer(CHEMIN_CONFIG_POSTGRES)
     CHEMIN_CONFIG_POSTGRES.write_text(
         json.dumps({
             "hote": config.hote, "port": config.port, "base": config.base,
