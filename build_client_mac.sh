@@ -34,8 +34,30 @@ fi
 
 if ! command -v python3 &>/dev/null; then
   echo "python3 introuvable. Installez-le depuis https://www.python.org/downloads/macos/" >&2
-  echo "(ou via Homebrew : brew install python)" >&2
   exit 1
+fi
+
+# Le Python de Homebrew (brew install python) embarque un Tcl/Tk qui affiche
+# une FENÊTRE BLANCHE (jamais peinte, même en redimensionnant/cliquant) dans
+# SMP-Client.app sur macOS récent (Ventura/Sonoma+) — bug connu de Tkinter,
+# déjà rencontré en usage réel, sans rapport avec le code de l'app. Le
+# Python officiel (python.org) embarque un Tcl/Tk spécifiquement patché pour
+# macOS et n'a pas ce problème — détection par préfixe d'installation plutôt
+# que par simple présence de "brew" dans le chemin (plus fiable).
+PYTHON_PREFIX="$(python3 -c 'import sys; print(sys.prefix)')"
+if [[ "$PYTHON_PREFIX" != *"Python.framework"* ]]; then
+  echo "⚠️  ATTENTION : ce python3 ($PYTHON_PREFIX) ne vient pas de python.org."
+  echo "   S'il vient de Homebrew, SMP-Client.app affichera un ÉCRAN BLANC qui ne"
+  echo "   se corrige jamais (bug Tcl/Tk connu, indépendant du code de l'app)."
+  echo "   Recommandé : installez Python depuis"
+  echo "   https://www.python.org/downloads/macos/ puis relancez ce script en"
+  echo "   faisant passer son python3 en premier dans le PATH, par exemple :"
+  echo "     export PATH=\"/Library/Frameworks/Python.framework/Versions/3.12/bin:\$PATH\""
+  echo "     ./build_client_mac.sh"
+  read -rp "   Continuer quand même avec ce python3 ? [o/N] " _reponse_python
+  if [[ ! "$_reponse_python" =~ ^[oOyY] ]]; then
+    exit 1
+  fi
 fi
 
 RACINE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
